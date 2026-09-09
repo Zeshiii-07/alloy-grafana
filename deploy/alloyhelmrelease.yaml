@@ -33,10 +33,18 @@ spec:
             secretKeyRef:
               name: grafana-cloud-credentials
               key: tempo_url
+      extraPorts:
+        - name: otlp-grpc
+          port: 4317
+          targetPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          port: 4318
+          targetPort: 4318
+          protocol: TCP
       configMap:
         create: true
         content: |
-          // Existing Prometheus components...
           discovery.kubernetes "pods" {
             role = "pod"
           }
@@ -56,7 +64,6 @@ spec:
             }
           }
 
-          // New OpenTelemetry Tracing Components
           otelcol.receiver.otlp "default" {
             grpc {
               endpoint = "0.0.0.0:4317"
@@ -86,13 +93,3 @@ spec:
             username = env("USERNAME")
             password = env("TOKEN")
           }
-    service:
-      extraPorts:
-        - name: otlp-grpc
-          port: 4317
-          targetPort: 4317
-          protocol: TCP
-        - name: otlp-http
-          port: 4318
-          targetPort: 4318
-          protocol: TCP
