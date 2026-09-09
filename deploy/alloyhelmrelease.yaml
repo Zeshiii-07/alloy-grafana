@@ -28,26 +28,17 @@ spec:
             secretKeyRef:
               name: grafana-cloud-credentials
               key: token
+        - name: TEMPO_URL
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-credentials
+              key: tempo_url
       configMap:
         create: true
         content: |
+          // Existing Prometheus components...
           discovery.kubernetes "pods" {
             role = "pod"
-          }
-          discovery.kubernetes "nodes" {
-            role = "node"
-          }
-          discovery.kubernetes "services" {
-            role = "service"
-          }
-          discovery.kubernetes "endpoints" {
-            role = "endpoints"
-          }
-          discovery.kubernetes "endpointslices" {
-            role = "endpointslice"
-          }
-          discovery.kubernetes "ingresses" {
-            role = "ingress"
           }
 
           prometheus.scrape "pod_metrics" {
@@ -64,3 +55,44 @@ spec:
               }
             }
           }
+
+          // New OpenTelemetry Tracing Components
+          otelcol.receiver.otlp "default" {
+            grpc {
+              endpoint = "0.0.0.0:4317"
+            }
+            http {
+              endpoint = "0.0.0.0:4318"
+            }
+            output {
+              traces = [otelcol.processor.batch.default.input]
+            }
+          }
+
+          otelcol.processor.batch "default" {
+            output {
+              traces = [otelcol.exporter.otlphttp.grafana_cloud.input]
+            }
+          }
+
+          otelcol.exporter.otlphttp "grafana_cloud" {
+            client {
+              endpoint = env("TEMPO_URL")
+              auth     = otelcol.auth.basic.grafana_cloud.handler
+            }
+          }
+
+          otelcol.auth.basic "grafana_cloud" {
+            username = env("USERNAME")
+            password = env("TOKEN")
+          }
+    service:
+      extraPorts:
+        - name: otlp-grpc
+          port: 4317
+          targetPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          port: 4318
+          targetPort: 4318
+          protocol: TCP
