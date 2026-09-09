@@ -2,63 +2,39 @@ apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
   name: alloy
-  namespace: monitoring # <-- CHANGED THIS to match your secret
+  namespace: monitoring
 spec:
   interval: 10m
   chart:
     spec:
       chart: alloy
-      version: "0.2.0"
+      version: "0.6.0" # or your current chart version
       sourceRef:
         kind: HelmRepository
         name: grafana
         namespace: flux-system
   values:
+    controller:
+      type: daemonset
     alloy:
-      extraEnv:
-        - name: GRAFANA_CLOUD_LOKI_URL
-          valueFrom:
-            secretKeyRef:
-              name: grafana-cloud-credentials
-              key: loki_url
-        - name: GRAFANA_CLOUD_LOKI_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: grafana-cloud-credentials
-              key: loki_username
-        - name: GRAFANA_CLOUD_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: grafana-cloud-credentials
-              key: token
       configMap:
-        content: |-
-          logging {
-            level = "info"
-          }
-
-          discovery.kubernetes "pods" {
-            role = "pod"
-          }
-
-          // ... (Keep the rest of your discovery.relabel and loki blocks exactly the same) ...
-
-          discovery.relabel "pod_logs" {
-            targets = discovery.kubernetes.pods.targets
-            // [Your specific relabeling rules go here]
-          }
-
-          loki.source.kubernetes "pod_logs" {
-            targets    = discovery.relabel.pod_logs.output
-            forward_to = [loki.write.default.receiver]
-          }
-
-          loki.write "default" {
-            endpoint {
-              url = sys.env("GRAFANA_CLOUD_LOKI_URL")
-              basic_auth {
-                username = sys.env("GRAFANA_CLOUD_LOKI_USERNAME")
-                password = sys.env("GRAFANA_CLOUD_TOKEN")
-              }
-            }
-          }
+        create: true
+        # Reference your prometheus-only setup here
+    # Disable loki receiver/exporter if not used in your values, e.g.:
+    # If your values file maps environment variables from the secret:
+    extraEnv:
+      - name: PROMETHEUS_URL
+        valueFrom:
+          secretKeyRef:
+            name: grafana-cloud-credentials
+            key: prometheus_url
+      - name: GRAFANA_USER
+        valueFrom:
+          secretKeyRef:
+            name: grafana-cloud-credentials
+            key: username
+      - name: GRAFANA_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: grafana-cloud-credentials
+            key: token
