@@ -23,6 +23,11 @@ spec:
             secretKeyRef:
               name: grafana-cloud-credentials
               key: username
+        - name: TEMPO_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-credentials
+              key: tempo_username
         - name: TOKEN
           valueFrom:
             secretKeyRef:
@@ -90,6 +95,6 @@ spec:
           }
 
           otelcol.auth.basic "grafana_cloud" {
-            username = env("USERNAME")
+            username = env("TEMPO_USERNAME")
             password = env("TOKEN")
           }
