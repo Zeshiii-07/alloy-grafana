@@ -78,7 +78,7 @@ spec:
 
           otelcol.processor.batch "default" {
             output {
-              traces = [otelcol.exporter.otlphttp.grafana_cloud.input]
+              traces = [otelcol.exporter.otlp.grafana_cloud.input]
             }
           }
 
