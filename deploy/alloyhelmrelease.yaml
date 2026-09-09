@@ -17,6 +17,17 @@ spec:
     controller:
       type: daemonset
     alloy:
+      extraEnv:
+        - name: USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-credentials
+              key: username
+        - name: TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-credentials
+              key: token
       configMap:
         create: true
         content: |
@@ -53,14 +64,3 @@ spec:
               }
             }
           }
-    extraEnv:
-      - name: USERNAME
-        valueFrom:
-          secretKeyRef:
-            name: grafana-cloud-credentials
-            key: username
-      - name: TOKEN
-        valueFrom:
-          secretKeyRef:
-            name: grafana-cloud-credentials
-            key: token
