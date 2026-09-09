@@ -82,7 +82,7 @@ spec:
             }
           }
 
-          otelcol.exporter.otlphttp "grafana_cloud" {
+          otelcol.exporter.otlp "grafana_cloud" {
             client {
               endpoint = env("TEMPO_URL")
               auth     = otelcol.auth.basic.grafana_cloud.handler
