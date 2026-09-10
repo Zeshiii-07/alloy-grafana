@@ -1,100 +1,185 @@
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-conf
+  namespace: monitoring
+data:
+  config.alloy: |
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+
+    prometheus.scrape "pod_metrics" {
+      targets    = discovery.kubernetes.pods.targets
+      forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+    }
+
+    prometheus.remote_write "grafana_cloud" {
+      endpoint {
+        url = "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
+        basic_auth {
+          username = env("USERNAME")
+          password = env("TOKEN")
+        }
+      }
+    }
+
+    otelcol.receiver.otlp "default" {
+      grpc {
+        endpoint = "0.0.0.0:4317"
+      }
+      http {
+        endpoint = "0.0.0.0:4318"
+      }
+      output {
+        traces = [otelcol.processor.batch.default.input]
+      }
+    }
+
+    otelcol.processor.batch "default" {
+      output {
+        traces = [otelcol.exporter.otlp.grafana_cloud.input]
+      }
+    }
+
+    otelcol.exporter.otlp "grafana_cloud" {
+      client {
+        endpoint = env("TEMPO_URL")
+        auth     = otelcol.auth.basic.grafana_cloud.handler
+      }
+    }
+
+    otelcol.auth.basic "grafana_cloud" {
+      username = env("TEMPO_USERNAME")
+      password = env("TOKEN")
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
 metadata:
   name: alloy
   namespace: monitoring
 spec:
-  interval: 10m
-  chart:
+  selector:
+    matchLabels:
+      app: alloy
+  template:
+    metadata:
+      labels:
+        app: alloy
     spec:
-      chart: alloy
-      version: "0.6.0"
-      sourceRef:
-        kind: HelmRepository
-        name: grafana
-        namespace: flux-system
-  values:
-    controller:
-      type: daemonset
-    alloy:
-      extraEnv:
-        - name: USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: grafana-cloud-credentials
-              key: username
-        - name: TEMPO_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: grafana-cloud-credentials
-              key: tempo_username
-        - name: TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: grafana-cloud-credentials
-              key: token
-        - name: TEMPO_URL
-          valueFrom:
-            secretKeyRef:
-              name: grafana-cloud-credentials
-              key: tempo_url
-      extraPorts:
-        - name: otlp-grpc
-          port: 4317
-          targetPort: 4317
-          protocol: TCP
-        - name: otlp-http
-          port: 4318
-          targetPort: 4318
-          protocol: TCP
-      configMap:
-        create: true
-        content: |
-          discovery.kubernetes "pods" {
-            role = "pod"
-          }
-
-          prometheus.scrape "pod_metrics" {
-            targets    = discovery.kubernetes.pods.targets
-            forward_to = [prometheus.remote_write.grafana_cloud.receiver]
-          }
-
-          prometheus.remote_write "grafana_cloud" {
-            endpoint {
-              url = "https://prometheus-prod-37-prod-ap-southeast-1.grafana.net/api/prom/push"
-              basic_auth {
-                username = env("USERNAME")
-                password = env("TOKEN")
-              }
-            }
-          }
-
-          otelcol.receiver.otlp "default" {
-            grpc {
-              endpoint = "0.0.0.0:4317"
-            }
-            http {
-              endpoint = "0.0.0.0:4318"
-            }
-            output {
-              traces = [otelcol.processor.batch.default.input]
-            }
-          }
-
-          otelcol.processor.batch "default" {
-            output {
-              traces = [otelcol.exporter.otlp.grafana_cloud.input]
-            }
-          }
-
-          otelcol.exporter.otlp "grafana_cloud" {
-            client {
-              endpoint = env("TEMPO_URL")
-              auth     = otelcol.auth.basic.grafana_cloud.handler
-            }
-          }
-
-          otelcol.auth.basic "grafana_cloud" {
-            username = env("TEMPO_USERNAME")
-            password = env("TOKEN")
-          }
+      serviceAccountName: alloy
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.19.2
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/tmp/alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --stability.level=generally-available
+          env:
+            - name: USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud-credentials
+                  key: username
+            - name: TEMPO_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud-credentials
+                  key: tempo_username
+            - name: TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud-credentials
+                  key: token
+            - name: TEMPO_URL
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-cloud-credentials
+                  key: tempo_url
+          ports:
+            - name: http-metrics
+              containerPort: 12345
+              protocol: TCP
+            - name: otlp-grpc
+              containerPort: 4317
+              protocol: TCP
+            - name: otlp-http
+              containerPort: 4318
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http-metrics
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 473
+            runAsGroup: 473
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+            limits:
+              cpu: 3400m
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-conf
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app: alloy
+  name: alloy
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app: alloy
+  name: alloy
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app: alloy
+  name: alloy
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy
